@@ -1,0 +1,23 @@
+/* 侧边栏 */
+.sidebar-title { -fx-font-size: 24px; -fx-font-weight: bold; }
+.core-label { -fx-font-size: 14px; }
+.core-number { -fx-font-size: 40px; -fx-font-weight: bold; }
+
+/* 功能行文字 */
+.row-title { -fx-font-size: 17px; -fx-font-weight: bold; }
+.row-desc { -fx-font-size: 13px; }
+
+/* 提示框 */
+.tooltip-popup {
+    -fx-font-size: 14px;
+    -fx-padding: 12px;
+    -fx-background-radius: 8px;
+    -fx-border-width: 1px;
+    -fx-border-radius: 8px;
+}
+
+/* 运行日志 */
+.log-text {
+    -fx-font-size: 12px;
+    -fx-font-family: "Consolas", "Microsoft YaHei";
+}
