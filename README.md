@@ -49,3 +49,10 @@ git clone [https://github.com/你的用户名/PitayaBox-Java.git](https://github
 # 2. 用 IntelliJ IDEA 打开
 # 3. 使用 Maven 进行构建或打包
 mvn clean package
+```
+## ⚖️ 免责声明
+本工具仅用于个人学习与技术交流。用户在使用本工具时，请务必遵守当地法律法规。因使用本工具而导致的任何直接或间接损失，作者不承担任何法律责任。
+
+## 🤝 致谢与原作者
+本项目的 UI 设计、核心业务逻辑及创意均来源于原作者的 Rust 版本项目。感谢原作者提供如此优秀的作品！
+* **原作者项目链接**：[https://github.com/PitayaBox/FuckACE]
