@@ -97,7 +97,7 @@ public class AppMain extends Application {
         githubBtn = new Button();
         githubBtn.setMinSize(44, 44);
         githubBtn.setStyle("-fx-background-radius: 22; -fx-background-color: #2d333b; -fx-cursor: hand;");
-        githubBtn.setOnAction(e -> { try { Desktop.getDesktop().browse(new URI("https://github.com/")); } catch (Exception ignored) {} });
+        githubBtn.setOnAction(e -> { try { Desktop.getDesktop().browse(new URI("https://github.com/x423729-code/FuckACE")); } catch (Exception ignored) {} });
         try {
             var ghImg = getClass().getResourceAsStream("/images/github.png");
             if (ghImg != null) {
@@ -336,9 +336,23 @@ public class AppMain extends Application {
 
     private void makeSmooth(ScrollPane sp) {
         sp.addEventFilter(ScrollEvent.SCROLL, e -> {
-            double targetV = Math.max(0, Math.min(1, sp.getVvalue() - (e.getDeltaY() * 0.005))); // 降低灵敏度，修复卡死
-            new Timeline(new KeyFrame(Duration.millis(200), new KeyValue(sp.vvalueProperty(), targetV, Interpolator.EASE_OUT))).play();
-            e.consume();
+            // 只有垂直滚动时才拦截
+            if (e.getDeltaY() != 0) {
+                e.consume(); // 吞掉原本过慢的默认事件
+
+                // 👈 灵敏度调节阀！50 代表滚轮滚一下，画面移动 50 个像素。
+                // 觉得慢了就调大（如 80），觉得太快就调小（如 30）
+                double scrollSpeed = 50.0;
+
+                double contentHeight = sp.getContent().getBoundsInLocal().getHeight();
+                double viewportHeight = sp.getViewportBounds().getHeight();
+
+                // 滚轮向上 getDeltaY() 是正数，向下是负数
+                double direction = e.getDeltaY() > 0 ? -1 : 1;
+                double newValue = sp.getVvalue() + (direction * scrollSpeed / (contentHeight - viewportHeight));
+
+                sp.setVvalue(Math.max(0.0, Math.min(newValue, 1.0)));
+            }
         });
     }
 
