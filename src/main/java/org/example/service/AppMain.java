@@ -34,14 +34,21 @@ public class AppMain extends Application {
     private Timer autoCleanTimer;
 
     private ToggleButton cpuAffinityCheck, priorityCheck, ecoModeCheck, ioWeightCheck, ramResidentCheck;
-    private ToggleButton tsWorkingSet, tsCache, tsAutoClean; // 内存清理模块开关
+    private ToggleButton tsWorkingSet, tsSystemWs, tsStandby, tsModified, tsCache, tsAutoClean; // 内存清理模块开关
+    private ToggleButton tsAutoStart; // ★ 开机自启动开关
 
     private final List<ToggleButton> allSwitches = new ArrayList<>();
     private final List<Label> allInfoIcons = new ArrayList<>();
-    private VBox logContainer, sidebar, mainContent, coreCard, restrictionCard, memoryCard;
+    // ★ 统一收集所有卡片节标题、行主标题、行描述，主题切换时一次遍历全部更新
+    private final List<VBox> allCards = new ArrayList<>();
+    private final List<Label> allSectionTitles = new ArrayList<>();
+    private final List<Label> allRowTitles = new ArrayList<>();  // 行主标题（粗体大字）
+    private final List<Label> allRowDescs  = new ArrayList<>();  // 行描述（小字）
+    private VBox logContainer, sidebar, mainContent, coreCard, restrictionCard, memoryCard, settingsCard;
     private ScrollPane logScroll;
     private Label title, panelTitle, sectionTitle, coreLabel, coreNum;
-    private Label memSectionTitle, ramTitle, ramText, lblTimer, lblAuto; // 内存模块文本
+    private Label memSectionTitle, ramTitle, ramText, lblTimer, lblAuto;
+    private Label settingsSectionTitle;
     private ProgressBar ramBar;
     private TextField txtTimer;
     private Button themeBtn, githubBtn, optimizeBtn, btnCleanNow;
@@ -147,6 +154,9 @@ public class AppMain extends Application {
         RowResult r5 = createRow("🧠", "内存驻留降权", "降低RAM分配优先级", "中风险。在内存紧张时，系统会优先回收此进程的内存。", false);
         cpuAffinityCheck = r1.toggle; priorityCheck = r2.toggle; ecoModeCheck = r3.toggle; ioWeightCheck = r4.toggle; ramResidentCheck = r5.toggle;
         restrictionCard.getChildren().addAll(sectionTitle, r1.row, r2.row, r3.row, r4.row, r5.row);
+        // ★ 注册到统一集合
+        allCards.add(restrictionCard);
+        allSectionTitles.add(sectionTitle);
 
         // --- 模块 2：系统内存清理 ---
         memoryCard = new VBox(0);
@@ -172,9 +182,15 @@ public class AppMain extends Application {
         VBox rightControls = new VBox(0);
         HBox.setHgrow(rightControls, Priority.ALWAYS);
 
-        RowResult m1 = createRow("🧹", "清理进程工作集", "将闲置内存挤压至虚拟内存", "大幅降低正在运行程序的物理内存占用，效果立竿见影。", true);
-        RowResult m2 = createRow("🗄️", "清理系统文件缓存", "强行清空Windows备用缓存", "释放被系统文件和预加载占用的备用内存池。", true);
+        // ★ 五个清理项（对标 Mem Reduct）
+        // 前两项无需管理员，后三项需要管理员（会自动检测并在日志提示）
+        RowResult m1 = createRow("🧹", "进程工作集", "强制回收各进程物理内存页", "无需管理员。将所有进程闲置的物理内存页挤入虚拟内存，立即释放 RAM，效果立竿见影。", true);
+        RowResult m2 = createRow("🗄️", "文件系统缓存", "强行清空 Windows 备用缓存", "无需管理员（有时需要）。释放被系统文件和预加载占用的备用内存池。", true);
+        RowResult m3 = createRow("⚙️", "系统工作集", "回收内核/驱动占用的内存", "需要管理员。释放 Windows 内核和驱动程序本身占用的物理内存。", false);
+        RowResult m4 = createRow("⚡", "备用内存列表", "瞬间释放大量备用内存（最强）", "需要管理员。对标 Mem Reduct 核心功能：将 Standby 状态页面直接标为可用，可一次释放数 GB 内存。", false);
+        RowResult m5 = createRow("💾", "修改页面写入", "脏页写盘后立即释放", "需要管理员。将被修改但未写入磁盘的内存页强制刷写，之后这些页面即可被回收。", false);
         tsWorkingSet = m1.toggle; tsCache = m2.toggle;
+        tsSystemWs = m3.toggle; tsStandby = m4.toggle; tsModified = m5.toggle;
 
         HBox bottomControl = new HBox(15);
         bottomControl.setAlignment(Pos.CENTER_LEFT);
@@ -209,11 +225,53 @@ public class AppMain extends Application {
         });
 
         bottomControl.getChildren().addAll(btnCleanNow, lblTimer, txtTimer, tsAutoClean, lblAuto);
-        rightControls.getChildren().addAll(m1.row, m2.row, bottomControl);
+        rightControls.getChildren().addAll(m1.row, m2.row, m3.row, m4.row, m5.row, bottomControl);
         splitPane.getChildren().addAll(leftMonitor, rightControls);
         memoryCard.getChildren().addAll(memSectionTitle, splitPane);
+        // ★ 注册到统一集合
+        allCards.add(memoryCard);
+        allSectionTitles.add(memSectionTitle);
 
-        mainContent.getChildren().addAll(topBar, restrictionCard, memoryCard);
+        // ★ --- 模块 3：系统设置（开机自启动） ---
+        settingsCard = new VBox(0);
+        settingsCard.setStyle("-fx-background-color: #1a1d23; -fx-background-radius: 15; -fx-padding: 10 20;");
+        settingsSectionTitle = new Label(" 🛠  系统设置");
+        settingsSectionTitle.setStyle("-fx-text-fill: #666; -fx-font-size: 13px; -fx-padding: 15 0 10 0;");
+
+        // 启动时读取注册表，同步真实状态（后台线程，避免阻塞 UI）
+        boolean autoStartEnabled = false;
+        try {
+            autoStartEnabled = AutoStartService.isEnabled();
+        } catch (Exception ignored) {}
+
+        RowResult s1 = createRow("🚀", "开机自启动",
+                "随 Windows 启动自动运行",
+                "无风险。将程序注册到当前用户的启动项（注册表 HKCU Run），无需管理员权限，随时可关闭。",
+                autoStartEnabled);
+        tsAutoStart = s1.toggle;
+
+        // ★ 监听开关变化，写入/删除注册表
+        tsAutoStart.selectedProperty().addListener((obs, oldV, isOn) -> {
+            new Thread(() -> {
+                boolean success = isOn ? AutoStartService.enable() : AutoStartService.disable();
+                Platform.runLater(() -> {
+                    if (success) {
+                        addLog("开机自启动 " + (isOn ? "已启用 ✅" : "已禁用"));
+                    } else {
+                        addLog("⚠️ 开机自启动设置失败，请检查日志");
+                        tsAutoStart.setSelected(!isOn);
+                    }
+                });
+            }).start();
+        });
+
+        settingsCard.getChildren().addAll(settingsSectionTitle, s1.row);
+        // ★ 注册到统一集合
+        allCards.add(settingsCard);
+        allSectionTitles.add(settingsSectionTitle);
+
+        // 将三个卡片全部加入主内容区
+        mainContent.getChildren().addAll(topBar, restrictionCard, memoryCard, settingsCard);
 
         // 4. 加载场景 (注意这里将原来的 mainContent 替换为了支持滚动的 mainScrollPane)
         Scene scene = new Scene(new HBox(sidebar, mainScrollPane), 1000, 750);
@@ -254,6 +312,9 @@ public class AppMain extends Application {
         Label t = new Label(tStr); t.getStyleClass().add("row-title"); t.setStyle("-fx-text-fill: white;");
         Label d = new Label(dStr); d.getStyleClass().add("row-desc"); d.setStyle("-fx-text-fill: #666;");
         texts.getChildren().addAll(t, d);
+        // ★ 注册进全局列表，主题切换时统一更新，不再依赖递归遍历
+        allRowTitles.add(t);
+        allRowDescs.add(d);
 
         Label info = new Label("ⓘ");
         info.setMinWidth(35); info.setAlignment(Pos.CENTER);
@@ -283,53 +344,92 @@ public class AppMain extends Application {
 
     private void toggleTheme() {
         isDarkTheme = !isDarkTheme;
-        String txtC = isDarkTheme ? "white" : "#1f2937";
-        String dscC = isDarkTheme ? "#666" : "#4b5563";
-        String cardBg = isDarkTheme ? "#1a1d23" : "#f9fafb";
-        String cardBorder = isDarkTheme ? "transparent" : "#eee";
+        String txtC      = isDarkTheme ? "white"    : "#1f2937";
+        String dscC      = isDarkTheme ? "#666"     : "#4b5563";
+        String cardBg    = isDarkTheme ? "#1a1d23"  : "#f9fafb";
+        String cardBorder= isDarkTheme ? "transparent" : "#eee";
+        String sidebarBg = isDarkTheme ? "#1a1d23"  : "#f3f4f6";
+        String mainBg    = isDarkTheme ? "#0f1115"  : "#ffffff";
+        String coreBg    = isDarkTheme ? "#252a34"  : "#ffffff";
+        String inputBg   = isDarkTheme ? "#2d333b"  : "#ffffff";
+        String inputBorder = isDarkTheme ? "#444"   : "#ccc";
+        String btnBg     = isDarkTheme ? "#2d333b"  : "#e5e7eb";
+        String ramBarBg  = isDarkTheme ? "#2d333b"  : "#e5e7eb";
+        String infoColor = isDarkTheme ? "#555"     : "#999";
 
-        sidebar.setStyle("-fx-background-color: " + (isDarkTheme ? "#1a1d23" : "#f3f4f6") + ";");
-        mainContent.setStyle("-fx-background-color: " + (isDarkTheme ? "#0f1115" : "#ffffff") + ";");
+        // --- 容器背景 ---
+        sidebar.setStyle("-fx-background-color: " + sidebarBg + ";");
+        mainContent.setStyle("-fx-background-color: " + mainBg + ";");
+        coreCard.setStyle("-fx-background-color: " + coreBg + "; -fx-background-radius: 12; -fx-padding: 20;");
 
-        restrictionCard.setStyle("-fx-background-color: " + cardBg + "; -fx-background-radius: 15; -fx-padding: 10 20; -fx-border-color: " + cardBorder + ";");
-        memoryCard.setStyle("-fx-background-color: " + cardBg + "; -fx-background-radius: 15; -fx-padding: 10 20; -fx-border-color: " + cardBorder + ";");
-        coreCard.setStyle("-fx-background-color: " + (isDarkTheme ? "#252a34" : "#ffffff") + "; -fx-background-radius: 12; -fx-padding: 20;");
+        // --- 所有卡片（统一循环，新增卡片只需注册到 allCards/allSectionTitles 即可）---
+        String cardStyle = "-fx-background-color: " + cardBg + "; -fx-background-radius: 15; -fx-padding: 10 20; -fx-border-color: " + cardBorder + ";";
+        for (VBox card : allCards) card.setStyle(cardStyle);
 
+        // --- 节标题（灰色小标，统一处理）---
+        for (Label sec : allSectionTitles)
+            sec.setStyle("-fx-text-fill: #666; -fx-font-size: 13px; -fx-padding: 15 0 10 0;");
+
+        // --- 各卡片内行文字：直接遍历注册好的列表，100%可靠 ---
+        for (Label lbl : allRowTitles) lbl.setStyle("-fx-text-fill: " + txtC + "; -fx-font-weight: bold; -fx-font-size: 17px;");
+        for (Label lbl : allRowDescs)  lbl.setStyle("-fx-text-fill: " + dscC + "; -fx-font-size: 13px;");
+
+        // --- 固定文字标签 ---
         title.setStyle("-fx-text-fill: " + txtC + ";");
         panelTitle.setStyle("-fx-text-fill: " + txtC + "; -fx-font-size: 26px; -fx-font-weight: bold;");
+        coreLabel.setStyle("-fx-text-fill: #888;");
         ramTitle.setStyle("-fx-text-fill: " + txtC + "; -fx-font-size: 14px;");
-
         ramText.setStyle("-fx-text-fill: " + dscC + "; -fx-font-size: 12px;");
         lblTimer.setStyle("-fx-text-fill: " + dscC + ";");
         lblAuto.setStyle("-fx-text-fill: " + dscC + ";");
-        txtTimer.setStyle("-fx-background-color: " + (isDarkTheme ? "#2d333b" : "#ffffff") + "; -fx-text-fill: " + txtC + "; -fx-border-color: " + (isDarkTheme ? "#444" : "#ccc") + "; -fx-border-radius: 4;");
-        ramBar.setStyle("-fx-accent: " + COLOR_PINK + "; -fx-control-inner-background: " + (isDarkTheme ? "#2d333b" : "#e5e7eb") + ";");
 
+        // --- 输入框 ---
+        txtTimer.setStyle("-fx-background-color: " + inputBg + "; -fx-text-fill: " + txtC
+                + "; -fx-border-color: " + inputBorder + "; -fx-border-radius: 4;");
+
+        // --- 进度条 ---
+        ramBar.setStyle("-fx-accent: " + COLOR_PINK + "; -fx-control-inner-background: " + ramBarBg + ";");
+
+        // --- 主题/GitHub 按钮 ---
         themeBtn.setText(isDarkTheme ? "🌙" : "☀️");
-        themeBtn.setStyle("-fx-background-radius: 22; -fx-background-color: " + (isDarkTheme ? "#2d333b" : "#e5e7eb") + "; -fx-text-fill: #f59e0b; -fx-cursor: hand;");
+        themeBtn.setStyle("-fx-background-radius: 22; -fx-background-color: " + btnBg + "; -fx-text-fill: #f59e0b; -fx-cursor: hand;");
+        githubBtn.setStyle("-fx-background-radius: 22; -fx-background-color: " + btnBg + "; -fx-cursor: hand;");
 
-        for (Label i : allInfoIcons) i.setStyle("-fx-text-fill: " + (isDarkTheme ? "#555" : "#999") + "; -fx-font-size: 15px; -fx-cursor: hand;");
-        for (ToggleButton s : allSwitches) s.setStyle("-fx-background-color: " + (s.isSelected() ? COLOR_BLUE : getOffColor()) + "; -fx-background-radius: 12;");
+        // --- 所有 ⓘ 图标和开关 ---
+        for (Label i : allInfoIcons)
+            i.setStyle("-fx-text-fill: " + infoColor + "; -fx-font-size: 15px; -fx-cursor: hand;");
+        for (ToggleButton s : allSwitches)
+            s.setStyle("-fx-background-color: " + (s.isSelected() ? COLOR_BLUE : getOffColor()) + "; -fx-background-radius: 12;");
 
-        updateCardTextColor(restrictionCard, txtC, dscC);
-        updateCardTextColor(memoryCard, txtC, dscC);
-
-        // 刷新现有的所有日志文本颜色
+        // --- 日志区文字 ---
         for (Node n : logContainer.getChildren()) {
-            if (n instanceof Label l) {
-                l.setStyle("-fx-text-fill: " + dscC + ";");
-            }
+            if (n instanceof Label l) l.setStyle("-fx-text-fill: " + dscC + ";");
         }
 
-        // 重新调用 addLog，现在它会自适应当前的主题色了
         addLog("主题切换成功");
     }
 
-    private void updateCardTextColor(VBox card, String txtC, String dscC) {
-        for (Node n : card.getChildren()) {
-            if (n instanceof HBox row && row.getChildren().size() >= 2 && row.getChildren().get(1) instanceof VBox ts) {
+    /**
+     * 递归遍历容器内所有行（HBox），更新行标题和描述文字颜色。
+     * 判断标准：HBox 的第二个子节点是 VBox（即 createRow 生成的 texts 容器）。
+     * 递归确保 splitPane → rightControls 这类嵌套结构也能被正确处理。
+     */
+    private void updateCardTextColor(javafx.scene.Parent container, String txtC, String dscC) {
+        for (Node n : container.getChildrenUnmodifiable()) {
+            if (n instanceof HBox row
+                    && row.getChildren().size() >= 2
+                    && row.getChildren().get(1) instanceof VBox ts
+                    && ts.getChildren().size() >= 2) {
+                // 第一个子节点是 emoji Label，主题切换时颜色跟主文字保持一致
+                if (row.getChildren().get(0) instanceof Label emoji) {
+                    emoji.setStyle("-fx-text-fill: " + txtC + ";");
+                }
+                // texts VBox 里：第0个是标题，第1个是描述
                 ((Label) ts.getChildren().get(0)).setStyle("-fx-text-fill: " + txtC + ";");
                 ((Label) ts.getChildren().get(1)).setStyle("-fx-text-fill: " + dscC + ";");
+            } else if (n instanceof javafx.scene.Parent p) {
+                // 递归处理所有嵌套容器（HBox splitPane、VBox rightControls 等）
+                updateCardTextColor(p, txtC, dscC);
             }
         }
     }
@@ -394,16 +494,31 @@ public class AppMain extends Application {
     }
 
     private void executeMemoryClean() {
-        boolean doWs = tsWorkingSet.isSelected();
-        boolean doCache = tsCache.isSelected();
-        if (!doWs && !doCache) {
+        boolean doWs       = tsWorkingSet.isSelected();
+        boolean doCache     = tsCache.isSelected();
+        boolean doSystemWs  = tsSystemWs.isSelected();
+        boolean doStandby   = tsStandby.isSelected();
+        boolean doModified  = tsModified.isSelected();
+
+        if (!doWs && !doCache && !doSystemWs && !doStandby && !doModified) {
             addLog("操作取消：未勾选任何清理项");
             return;
         }
+
+        // 提前检测权限并给出提示
+        boolean isAdmin = MemoryCleaner.isRunningAsAdmin();
+        if ((doSystemWs || doStandby || doModified) && !isAdmin) {
+            addLog("⚠️ 检测到非管理员权限，系统级清理项将被跳过");
+        }
+
         addLog("正在执行深层系统内存清理...");
         new Thread(() -> {
-            MemoryCleaner.executeClean(doWs, doCache);
-            Platform.runLater(() -> addLog("✅ 内存清理完成"));
+            List<MemoryCleaner.CleanResult> results =
+                    MemoryCleaner.executeClean(doWs, doSystemWs, doStandby, doModified, doCache);
+            Platform.runLater(() -> {
+                results.forEach(r -> addLog(r.toString()));
+                addLog("— 清理完成 —");
+            });
         }).start();
     }
 
